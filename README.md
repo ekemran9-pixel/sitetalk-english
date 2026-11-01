@@ -10,6 +10,8 @@ js/scenarios-1.js     scenario content, modules A (Daily), B (Fabrication), C (Q
 js/scenarios-2.js     scenario content, modules D (Maintenance), E (Safety), F (Problem solving)
 js/grammar.js         categories, speaker names, 13 grammar lessons, 30-day plan
 js/app.js             app logic: Data → Store → Voice → Coach → AI → Views → Router → Events
+sw.js                 service worker: offline cache for the app (bump VERSION after changes)
+manifest.webmanifest  install-to-home-screen settings; icons/ holds the app icons
 ```
 
 ## Adding content
@@ -26,6 +28,12 @@ js/app.js             app logic: Data → Store → Voice → Coach → AI → V
   2. **Gemini (free)**: used anywhere else, e.g. GitHub Pages. Add your own free API key from https://aistudio.google.com/apikey in the app (Home → Settings, or the AI Practice page). The key is stored only in your browser's `localStorage`. It is never committed or synced. The default model is `gemini-flash-lite-latest`, which has the most free requests per day.
   3. **Offline scripted coach**: used when no AI is available. It checks answers with word matching and grammar rules, with Bangla explanations (`RULES` in app.js).
 * **Voice**: listening uses the browser's speech synthesis. Speaking uses browser speech recognition where it is allowed. Otherwise, use your phone keyboard's dictation key.
+
+## Offline use
+
+On GitHub Pages the app is a PWA. After one online visit, every lesson works without internet: scenarios, vocabulary, grammar, tests, the 30-day plan, saved sentences, search and the offline coach. Only AI talk (Gemini) needs internet. If you are offline, the AI Practice page switches to the offline coach on its own. On iPhone, open the site in Safari, tap Share → Add to Home Screen, and open it once from the home screen while online.
+
+When you change any app file, bump `VERSION` in `sw.js` so phones pick up the new version.
 
 ## Run on GitHub Pages
 

@@ -380,7 +380,7 @@ function acts(en, bn, src, sv) {
 }
 function speakBox(id, target, bn) {
   const r = SPK_RES[id];
-  let h = '<div class="spk"><p class="spk-bn" lang="bn">' + esc(bn) + '</p><div class="spk-in"><textarea id="' + id + '" data-bind="' + id + '" rows="2" placeholder="' + esc(T("typeOrSpeak")) + '" autocapitalize="sentences" lang="en">' + esc(BIND[id] || "") + '</textarea><button class="icon-btn mic" data-act="mic" data-target="' + id + '" aria-label="Mic">' + I.mic + '</button></div><div class="row"><button class="btn primary sm" data-act="spkCheck" data-id="' + id + '" data-t="' + esc(target) + '">' + T("check") + '</button><button class="btn sm" data-act="say" data-t="' + esc(target) + '">' + I.speaker + T("listen") + '</button><button class="btn sm ghost" data-act="spkShow" data-id="' + id + '">' + T("answer") + "</button>" + (sampleState === "online" ? '<button class="btn sm ghost" data-act="spkAI" data-id="' + id + '" data-t="' + esc(target) + '" data-bn="' + esc(bn) + '">' + T("aiCheck") + "</button>" : "") + "</div>";
+  let h = '<div class="spk"><p class="spk-bn" lang="bn">' + esc(bn) + '</p><div class="spk-in"><textarea id="' + id + '" data-bind="' + id + '" rows="2" placeholder="' + esc(T("typeOrSpeak")) + '" autocapitalize="sentences" lang="en">' + esc(BIND[id] || "") + '</textarea><button class="icon-btn mic" data-act="mic" data-target="' + id + '" aria-label="Mic">' + I.mic + '</button></div><div class="row"><button class="btn primary sm" data-act="spkCheck" data-id="' + id + '" data-t="' + esc(target) + '">' + T("check") + '</button><button class="btn sm" data-act="say" data-t="' + esc(target) + '">' + I.speaker + T("listen") + '</button><button class="btn sm ghost" data-act="spkShow" data-id="' + id + '">' + T("answer") + "</button>" + (sampleState === "online" && navigator.onLine ? '<button class="btn sm ghost" data-act="spkAI" data-id="' + id + '" data-t="' + esc(target) + '" data-bn="' + esc(bn) + '">' + T("aiCheck") + "</button>" : "") + "</div>";
   if (r) {
     if (r.show) h += '<p class="target en" lang="en">' + esc(target) + "</p>";
     if (r.cmp) {
@@ -448,6 +448,8 @@ function settingsHTML() {
   let h = '<section class="settings"><h2 class="sec">' + T("settings") + '</h2><div class="set-row"><span>' + T("uiLang") + '</span><div class="seg"><button class="' + (S.lang === "bn" ? "on" : "") + '" data-act="lang" data-v="bn">বাংলা</button><button class="' + (S.lang === "en" ? "on" : "") + '" data-act="lang" data-v="en">English</button></div></div>';
   if (!sampleFn) h += geminiHTML(false);
   h += '<div class="set-row"><label for="rate">' + T("speed") + ' <span class="mono" id="rate-v">' + (S.rate || 0.9).toFixed(2) + '×</span></label><input id="rate" type="range" min="0.6" max="1.2" step="0.05" value="' + (S.rate || 0.9) + '" data-act-input="rate"></div>';
+  h += '<div class="set-row"><span>' + (S.lang === "en" ? "Offline use" : "অফলাইন ব্যবহার") + '</span><span id="offline-state" class="mono muted">' + offlineText() + "</span></div>";
+  if (offlineReady) h += '<p class="muted small bn" lang="bn">' + (S.lang === "en" ? "iPhone: in Safari tap Share → “Add to Home Screen”. Open SiteTalk once from the home screen while online; after that it opens without internet." : "iPhone-এ: Safari-তে Share বোতাম → “Add to Home Screen” চাপুন। হোম স্ক্রিন থেকে একবার ইন্টারনেট থাকা অবস্থায় SiteTalk খুলুন; এরপর ইন্টারনেট ছাড়াই খুলবে।") + "</p>";
   h += '<div class="set-row"><span id="sync" data-mode="' + syncMode + '">' + T("sync_" + syncMode) + "</span>";
   h += resetAsk ? '<span class="row"><span class="muted">' + T("resetConfirm") + '</span><button class="btn sm danger" data-act="resetYes">' + T("yesReset") + '</button><button class="btn sm" data-act="resetNo">' + T("cancel") + "</button></span>" : '<button class="btn sm ghost" data-act="resetAsk">' + T("reset") + "</button>";
   return h + "</div></section>";
@@ -588,8 +590,8 @@ function searchResults(q) {
 const ROLES = { S: "Supervisor", Q: "QC Inspector", E: "Engineer", SO: "Safety Officer" };
 function vPractice() {
   if (chat.level == null) chat.level = S.ai.level || 1;
-  const offline = sampleState !== "online" || chat.offline;
-  let h = '<h1 class="page-t">' + T("practice") + '</h1><p class="badge-line"><span id="ai-badge" data-mode="' + (offline ? "offline" : sampleState) + '">' + (offline ? T("aiOffline") : T("aiOnline") + " · " + providerName()) + "</span></p>" + (offline && !sampleFn ? geminiHTML(true) : provider === "gemini" ? '<details class="gem-wrap"' + (gemStatus ? " open" : "") + "><summary>" + (S.lang === "en" ? "Gemini settings" : "Gemini সেটিংস") + "</summary>" + geminiHTML(false) + "</details>" : "");
+  const offline = sampleState !== "online" || chat.offline || !navigator.onLine;
+  let h = '<h1 class="page-t">' + T("practice") + '</h1><p class="badge-line"><span id="ai-badge" data-mode="' + (offline ? "offline" : sampleState) + '">' + (offline ? T("aiOffline") : T("aiOnline") + " · " + providerName()) + "</span></p>" + (!navigator.onLine ? '<p class="net-note bn" lang="bn">' + (S.lang === "en" ? "No internet. AI talk needs internet, so the offline coach is running. All lessons, grammar, tests and the 30-day plan work offline." : "ইন্টারনেট নেই। AI কথোপকথনের জন্য ইন্টারনেট লাগে, তাই এখন অফলাইন কোচ চলছে। সব পাঠ, গ্রামার, টেস্ট আর ৩০ দিনের প্ল্যান অফলাইনে চলবে।") + "</p>" : "") + (offline && !sampleFn ? geminiHTML(true) : provider === "gemini" ? '<details class="gem-wrap"' + (gemStatus ? " open" : "") + "><summary>" + (S.lang === "en" ? "Gemini settings" : "Gemini সেটিংস") + "</summary>" + geminiHTML(false) + "</details>" : "");
   h += '<div class="ai-setup"><label for="ai-role">' + T("role") + '</label><select id="ai-role" data-act-change="role">' + Object.entries(ROLES).map(([k, v]) => '<option value="' + k + '"' + (chat.role === k ? " selected" : "") + ">" + v + " · " + SPK[k][1] + "</option>").join("") + "</select>";
   h += '<label for="ai-topic">' + T("topic") + '</label><select id="ai-topic" data-act-change="topic">' + (offline ? "" : '<option value="free"' + (chat.topic === "free" ? " selected" : "") + ">" + T("freeTopic") + "</option>") + CATS.map((c) => '<optgroup label="' + esc(c.id + " · " + c.t) + '">' + SC.filter((s) => s.cat === c.id).map((s) => '<option value="' + s.id + '"' + (chat.topic === s.id ? " selected" : "") + ">" + esc(s.t) + "</option>").join("") + "</optgroup>").join("") + "</select>";
   h += '<span class="lab">' + T("level") + '</span><div class="seg">' + [1, 2, 3].map((l) => '<button class="' + (chat.level === l ? "on" : "") + '" data-act="aiLevel" data-v="' + l + '">' + lvlName(l) + "</button>").join("") + "</div></div>";
@@ -764,12 +766,12 @@ const ACT = {
   },
   gemClear: () => { saveGem({ key: "", model: loadGem().model }); pickProvider(); gemStatus = ""; chat.offline = true; resetChat(); render(); },
   aiLevel: (el) => { chat.level = +el.dataset.v; S.ai.level = chat.level; chat.okRun = 0; save(); render(); },
-  aiStart: () => { resetChat(); chat.offline = sampleState !== "online"; if (chat.offline) { offlineAsk(); render(); } else aiCall(); },
+  aiStart: () => { resetChat(); chat.offline = sampleState !== "online" || !navigator.onLine; if (chat.offline) { offlineAsk(); render(); } else aiCall(); },
   aiSend: () => {
     const box = document.getElementById("ai-in"); const text = ((box && box.value) || "").trim();
     if (!text || chat.busy) return;
     chat.msgs.push({ who: "me", text }); BIND["ai-in"] = "";
-    if (chat.offline || sampleState !== "online") { offlineAnswer(text); render(); scrollChat(); return; }
+    if (chat.offline || sampleState !== "online" || !navigator.onLine) { if (!chat.offline) { chat.offline = true; resetChat(); chat.msgs.push({ who: "sys", text: S.lang === "en" ? "No internet — switched to the offline coach." : "ইন্টারনেট নেই — অফলাইন কোচ চালু হলো।" }); offlineAsk(); render(); return; } offlineAnswer(text); render(); scrollChat(); return; }
     chat.turns.push({ role: "user", content: "Worker: " + text });
     aiCall();
   },
@@ -801,7 +803,26 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && e.target.id === "ai-in") { e.preventDefault(); ACT.aiSend(); }
 });
 
+/* ---------------- Offline (service worker) ---------------- */
+let offlineReady = false;
+function offlineText() {
+  if (!("serviceWorker" in navigator) || location.protocol !== "https:" && location.hostname !== "localhost") return S.lang === "en" ? "Available on the GitHub Pages version" : "GitHub Pages সংস্করণে পাওয়া যাবে";
+  return offlineReady ? (S.lang === "en" ? "Ready — all lessons saved on this phone" : "প্রস্তুত — সব পাঠ এই ফোনে সংরক্ষিত") : (S.lang === "en" ? "Saving lessons…" : "পাঠ সংরক্ষণ হচ্ছে…");
+}
+function initOffline() {
+  if (!("serviceWorker" in navigator)) return;
+  if (location.protocol !== "https:" && location.hostname !== "localhost") return;
+  navigator.serviceWorker.register("sw.js").then(() => navigator.serviceWorker.ready).then(() => caches.keys()).then((keys) => {
+    offlineReady = keys.some((k) => /^sitetalk-v/.test(k));
+    const el = document.getElementById("offline-state"); if (el) { el.textContent = offlineText(); el.classList.toggle("off-ok", offlineReady); }
+    if (currentRoute()[0] === "home") render();
+  }).catch(() => {});
+}
+window.addEventListener("offline", () => { toast(S.lang === "en" ? "Offline: lessons keep working. AI talk needs internet." : "অফলাইন: সব পাঠ চলবে। শুধু AI কথোপকথনে ইন্টারনেট লাগবে।"); render(); });
+window.addEventListener("online", () => { toast(S.lang === "en" ? "Back online." : "ইন্টারনেট ফিরে এসেছে।"); render(); });
+
 render();
+initOffline();
 initAI().then(() => { if (currentRoute()[0] === "practice" || currentRoute()[0] === "sc" || currentRoute()[0] === "day") render(); });
 initCloud();
 })();
