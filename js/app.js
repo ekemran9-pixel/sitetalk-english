@@ -234,16 +234,74 @@ function grammarHints(text) {
 }
 const hasBangla = (s) => /[ঀ-৿]/.test(s);
 
-/* ---------------- AI (sample capability) ---------------- */
+/* ---------------- AI providers ----------------
+ * 1. Claude (claude.use("sample")) — when the page runs as a Claude artifact.
+ * 2. Gemini (Google AI Studio API key, free tier) — anywhere else, e.g. GitHub Pages.
+ *    The key is kept only in this browser's localStorage (never in the repo, never synced).
+ * 3. Offline scripted coach — when neither is available.
+ */
 let sampleFn = null, sampleState = "checking"; // checking | online | offline
-async function initAI() {
-  if (!window.claude || !window.claude.use) { sampleState = "offline"; refreshAIBadge(); return; }
-  try { sampleFn = await window.claude.use("sample"); } catch (e) { sampleFn = null; }
-  sampleState = sampleFn ? "online" : "offline";
+let provider = null; // "claude" | "gemini" | null
+const GEM_KEY = "sitetalk.gemini.v1";
+const GEM_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
+function loadGem() { try { const g = JSON.parse(localStorage.getItem(GEM_KEY) || "{}"); return { key: g.key || "", model: g.model || GEM_MODELS[0] }; } catch (e) { return { key: "", model: GEM_MODELS[0] }; } }
+function saveGem(g) { try { localStorage.setItem(GEM_KEY, JSON.stringify(g)); } catch (e) {} }
+let gemStatus = "";
+function pickProvider() {
+  provider = sampleFn ? "claude" : loadGem().key ? "gemini" : null;
+  sampleState = provider ? "online" : "offline";
   refreshAIBadge();
 }
-function refreshAIBadge() { const b = document.getElementById("ai-badge"); if (b) { b.textContent = sampleState === "online" ? T("aiOnline") : sampleState === "offline" ? T("aiOffline") : "…"; b.dataset.mode = sampleState; } }
+async function initAI() {
+  if (window.claude && window.claude.use) { try { sampleFn = await window.claude.use("sample"); } catch (e) { sampleFn = null; } }
+  pickProvider();
+}
+const providerName = () => (provider === "claude" ? "Claude" : provider === "gemini" ? "Gemini" : "");
+function refreshAIBadge() { const b = document.getElementById("ai-badge"); if (b) { b.textContent = sampleState === "online" ? T("aiOnline") + " · " + providerName() : sampleState === "offline" ? T("aiOffline") : "…"; b.dataset.mode = sampleState; } }
+function parseLooseJSON(text) {
+  const t = String(text || "").trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  throw { code: "invalid_json" };
+}
+async function geminiJSON(input, signal) {
+  const g = loadGem();
+  if (!g.key) throw { code: "bad_key" };
+  const contents = [];
+  if (typeof input === "string") contents.push({ role: "user", parts: [{ text: input }] });
+  else for (const t of input) {
+    const role = t.role === "assistant" ? "model" : "user";
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) last.parts[0].text += "\n\n" + t.content;
+    else contents.push({ role, parts: [{ text: t.content }] });
+  }
+  let res;
+  try {
+    res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(g.model) + ":generateContent?key=" + encodeURIComponent(g.key), {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal,
+      body: JSON.stringify({ contents, generationConfig: { responseMimeType: "application/json", temperature: 0.6 } }),
+    });
+  } catch (e) { throw { code: e && e.name === "AbortError" ? "cancelled" : "network" }; }
+  let j = null; try { j = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const msg = (j && j.error && j.error.message) || "";
+    const st = res.status;
+    throw { code: st === 429 ? "rate_limited" : st === 404 ? "bad_model" : /api key|permission|unauthori/i.test(msg) || st === 401 || st === 403 ? "bad_key" : "upstream_error", message: msg };
+  }
+  const parts = (j && j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
+  return parseLooseJSON(parts.map((p) => p.text || "").join(""));
+}
+function aiJSON(input, signal) {
+  if (provider === "claude") return sampleFn.json(input, { cache: false, modelTier: "quick", signal });
+  if (provider === "gemini") return geminiJSON(input, signal);
+  return Promise.reject({ code: "not_granted" });
+}
 function aiErrorText(code) {
+  if (code === "bad_key") return S.lang === "en" ? "The Gemini API key was not accepted. Check it in Settings." : "Gemini API key গ্রহণ হয়নি। Settings-এ key-টা আবার দেখুন।";
+  if (code === "bad_model") return S.lang === "en" ? "This Gemini model is not available. Choose another model in Settings." : "এই Gemini মডেলটি পাওয়া যাচ্ছে না। Settings-এ অন্য মডেল বেছে নিন।";
+  if (code === "network") return S.lang === "en" ? "No internet connection to the AI. Check your network and try again." : "AI-এর সঙ্গে ইন্টারনেট সংযোগ হয়নি। নেটওয়ার্ক দেখে আবার চেষ্টা করুন।";
+  if (code === "rate_limited" && provider === "gemini") return S.lang === "en" ? "The free Gemini limit is used up for now. Wait a minute (or until tomorrow for the daily limit), or choose the Flash-Lite model, which allows more requests." : "Gemini-র ফ্রি লিমিট আপাতত শেষ। এক মিনিট অপেক্ষা করুন (দৈনিক লিমিট হলে কাল পর্যন্ত), অথবা Settings-এ Flash-Lite মডেল বেছে নিন — এতে বেশি অনুরোধ করা যায়।";
   if (code === "not_granted" || code === "sampling_disabled" || code === "not_declared" || code === "capability_disabled") return S.lang === "en" ? "AI is not allowed for this page right now. Switched to the offline coach." : "এই পেজে AI ব্যবহারের অনুমতি নেই। অফলাইন কোচ চালু করা হলো।";
   if (code === "rate_limited") return S.lang === "en" ? "Too many requests. Wait a minute and try again." : "অনেক বেশি অনুরোধ হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।";
   if (code === "session_expired") return S.lang === "en" ? "Please sign in again." : "আবার সাইন ইন করুন।";
@@ -374,8 +432,21 @@ function vHome() {
   h += settingsHTML();
   return h;
 }
+function geminiHTML(intro) {
+  const g = loadGem(), en = S.lang === "en";
+  let h = '<div class="gem"><p class="gem-t"><b>' + (en ? "Free AI Supervisor with Gemini" : "Gemini দিয়ে ফ্রি AI সুপারভাইজার") + "</b>" + (g.key ? ' <span class="chip lv1">' + (en ? "key saved" : "key সংরক্ষিত") + "</span>" : "") + "</p>";
+  if (intro || !g.key) h += '<ol class="gem-steps bn" lang="bn">' + (en
+    ? '<li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and sign in with Google.</li><li>Tap “Create API key” and copy it.</li><li>Paste it below and tap Save. The key stays only on this phone.</li>'
+    : '<li><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> খুলে Google অ্যাকাউন্টে সাইন ইন করুন।</li><li>“Create API key” চেপে key কপি করুন।</li><li>নিচে পেস্ট করে Save চাপুন। key শুধু আপনার এই ফোনেই থাকবে।</li>') + "</ol>";
+  h += '<div class="gem-row"><input id="gem-key" type="password" autocomplete="off" spellcheck="false" placeholder="' + (g.key ? "••••••••" + esc(g.key.slice(-4)) : "AIza…") + '" aria-label="Gemini API key"><select id="gem-model" aria-label="Model">' + GEM_MODELS.concat(GEM_MODELS.includes(g.model) ? [] : [g.model]).map((m) => '<option value="' + esc(m) + '"' + (m === g.model ? " selected" : "") + ">" + esc(m) + "</option>").join("") + "</select></div>";
+  h += '<div class="row"><button class="btn sm primary" data-act="gemSave">' + (en ? "Save" : "সংরক্ষণ") + '</button><button class="btn sm" data-act="gemTest"' + (g.key ? "" : " disabled") + ">" + (en ? "Test" : "পরীক্ষা") + "</button>" + (g.key ? '<button class="btn sm ghost" data-act="gemClear">' + (en ? "Remove key" : "key মুছুন") + "</button>" : "") + "</div>";
+  if (gemStatus) h += '<p class="gem-status">' + esc(gemStatus) + "</p>";
+  h += '<p class="muted small bn" lang="bn">' + (en ? "Flash-Lite gives the most free requests per day. Free-tier conversations may be used by Google to improve its products — do not type private information." : "Flash-Lite মডেলে প্রতিদিন সবচেয়ে বেশি ফ্রি অনুরোধ করা যায়। ফ্রি টিয়ারের কথোপকথন Google তাদের সেবা উন্নত করতে ব্যবহার করতে পারে — ব্যক্তিগত তথ্য লিখবেন না।") + "</p>";
+  return h + "</div>";
+}
 function settingsHTML() {
   let h = '<section class="settings"><h2 class="sec">' + T("settings") + '</h2><div class="set-row"><span>' + T("uiLang") + '</span><div class="seg"><button class="' + (S.lang === "bn" ? "on" : "") + '" data-act="lang" data-v="bn">বাংলা</button><button class="' + (S.lang === "en" ? "on" : "") + '" data-act="lang" data-v="en">English</button></div></div>';
+  if (!sampleFn) h += geminiHTML(false);
   h += '<div class="set-row"><label for="rate">' + T("speed") + ' <span class="mono" id="rate-v">' + (S.rate || 0.9).toFixed(2) + '×</span></label><input id="rate" type="range" min="0.6" max="1.2" step="0.05" value="' + (S.rate || 0.9) + '" data-act-input="rate"></div>';
   h += '<div class="set-row"><span id="sync" data-mode="' + syncMode + '">' + T("sync_" + syncMode) + "</span>";
   h += resetAsk ? '<span class="row"><span class="muted">' + T("resetConfirm") + '</span><button class="btn sm danger" data-act="resetYes">' + T("yesReset") + '</button><button class="btn sm" data-act="resetNo">' + T("cancel") + "</button></span>" : '<button class="btn sm ghost" data-act="resetAsk">' + T("reset") + "</button>";
@@ -518,7 +589,7 @@ const ROLES = { S: "Supervisor", Q: "QC Inspector", E: "Engineer", SO: "Safety O
 function vPractice() {
   if (chat.level == null) chat.level = S.ai.level || 1;
   const offline = sampleState !== "online" || chat.offline;
-  let h = '<h1 class="page-t">' + T("practice") + '</h1><p class="badge-line"><span id="ai-badge" data-mode="' + (offline ? "offline" : sampleState) + '">' + (offline ? T("aiOffline") : T("aiOnline")) + "</span></p>";
+  let h = '<h1 class="page-t">' + T("practice") + '</h1><p class="badge-line"><span id="ai-badge" data-mode="' + (offline ? "offline" : sampleState) + '">' + (offline ? T("aiOffline") : T("aiOnline") + " · " + providerName()) + "</span></p>" + (offline && !sampleFn ? geminiHTML(true) : provider === "gemini" ? '<details class="gem-wrap"' + (gemStatus ? " open" : "") + "><summary>" + (S.lang === "en" ? "Gemini settings" : "Gemini সেটিংস") + "</summary>" + geminiHTML(false) + "</details>" : "");
   h += '<div class="ai-setup"><label for="ai-role">' + T("role") + '</label><select id="ai-role" data-act-change="role">' + Object.entries(ROLES).map(([k, v]) => '<option value="' + k + '"' + (chat.role === k ? " selected" : "") + ">" + v + " · " + SPK[k][1] + "</option>").join("") + "</select>";
   h += '<label for="ai-topic">' + T("topic") + '</label><select id="ai-topic" data-act-change="topic">' + (offline ? "" : '<option value="free"' + (chat.topic === "free" ? " selected" : "") + ">" + T("freeTopic") + "</option>") + CATS.map((c) => '<optgroup label="' + esc(c.id + " · " + c.t) + '">' + SC.filter((s) => s.cat === c.id).map((s) => '<option value="' + s.id + '"' + (chat.topic === s.id ? " selected" : "") + ">" + esc(s.t) + "</option>").join("") + "</optgroup>").join("") + "</select>";
   h += '<span class="lab">' + T("level") + '</span><div class="seg">' + [1, 2, 3].map((l) => '<button class="' + (chat.level === l ? "on" : "") + '" data-act="aiLevel" data-v="' + l + '">' + lvlName(l) + "</button>").join("") + "</div></div>";
@@ -554,7 +625,7 @@ async function aiCall() {
   const ctl = new AbortController(); chat.ctl = ctl;
   const turns = [{ role: "user", content: aiRules() + "\n\nStart the conversation now with your first line." }].concat(chat.turns.slice(-14));
   try {
-    const r = await sampleFn.json(turns, { cache: false, modelTier: "quick", signal: ctl.signal });
+    const r = await aiJSON(turns, ctl.signal);
     if (!r || typeof r.reply !== "string") throw { code: "invalid_json" };
     chat.turns.push({ role: "assistant", content: JSON.stringify(r) });
     const last = chat.msgs[chat.msgs.length - 1];
@@ -568,7 +639,8 @@ async function aiCall() {
   } catch (e) {
     const c = (e && e.code) || "upstream_error";
     if (c !== "cancelled") {
-      if (PERMANENT.includes(c)) { sampleState = "offline"; chat.offline = true; resetChat(); chat.msgs.push({ who: "sys", text: aiErrorText(c) }); offlineAsk(); }
+      if (PERMANENT.includes(c) && provider === "claude") { sampleFn = null; pickProvider(); chat.offline = !provider; }
+      if (PERMANENT.includes(c) && !provider) { sampleState = "offline"; chat.offline = true; resetChat(); chat.msgs.push({ who: "sys", text: aiErrorText(c) }); offlineAsk(); }
       else chat.msgs.push({ who: "sys", text: aiErrorText(c) });
     }
   }
@@ -652,12 +724,12 @@ const ACT = {
   spkShow: (el) => { const id = el.dataset.id; SPK_RES[id] = Object.assign({}, SPK_RES[id], { show: true }); render(); },
   spkAI: async (el) => {
     const id = el.dataset.id; const box = document.getElementById(id); const text = (box && box.value) || ""; BIND[id] = text;
-    if (!text.trim() || !sampleFn) { box && box.focus(); return; }
+    if (!text.trim() || !provider) { box && box.focus(); return; }
     SPK_RES[id] = Object.assign({}, SPK_RES[id], { ai: "wait" }); render();
     try {
-      const r = await sampleFn.json('A Bangladeshi worker on a mechanical fabrication site is practising spoken English.\nTarget sentence: "' + el.dataset.t + '"\nMeaning in Bangla: ' + el.dataset.bn + '\nThe worker said: "' + text + '"\nJudge whether the worker\'s sentence is correct, natural English with the same meaning (it does not need to match word for word). Reply with only JSON: {"ok": true|false, "corrected": "their sentence corrected", "better": "a natural professional version", "explain_bn": "1-3 short sentences in simple Bangla about the mistake and the rule, or short praise"}', { modelTier: "quick" });
+      const r = await aiJSON('A Bangladeshi worker on a mechanical fabrication site is practising spoken English.\nTarget sentence: "' + el.dataset.t + '"\nMeaning in Bangla: ' + el.dataset.bn + '\nThe worker said: "' + text + '"\nJudge whether the worker\'s sentence is correct, natural English with the same meaning (it does not need to match word for word). Reply with only JSON: {"ok": true|false, "corrected": "their sentence corrected", "better": "a natural professional version", "explain_bn": "1-3 short sentences in simple Bangla about the mistake and the rule, or short praise"}');
       SPK_RES[id].ai = { ok: !!r.ok, corrected: String(r.corrected || ""), better: String(r.better || ""), explain_bn: String(r.explain_bn || "") };
-    } catch (e) { SPK_RES[id].ai = { err: aiErrorText(e && e.code) }; if (e && PERMANENT.includes(e.code)) sampleState = "offline"; }
+    } catch (e) { SPK_RES[id].ai = { err: aiErrorText(e && e.code) }; if (e && PERMANENT.includes(e.code) && provider === "claude") { sampleFn = null; pickProvider(); } }
     render();
   },
   dayTask: (el) => { setDayTask(+el.dataset.d, el.dataset.k); render(); },
@@ -677,6 +749,20 @@ const ACT = {
   resetAsk: () => { resetAsk = true; render(); },
   resetNo: () => { resetAsk = false; render(); },
   resetYes: () => { const keep = { lang: S.lang, rate: S.rate }; S = Object.assign(blank(), keep); resetAsk = false; Object.keys(QZ).forEach((k) => delete QZ[k]); save(); if (dbRef) flush(); render(); },
+  gemSave: () => {
+    const k = (document.getElementById("gem-key") || {}).value || ""; const m = (document.getElementById("gem-model") || {}).value || GEM_MODELS[0];
+    const g = loadGem(); if (k.trim()) g.key = k.trim(); g.model = m; saveGem(g); pickProvider();
+    gemStatus = g.key ? (S.lang === "en" ? "Saved. Tap Test to check it works." : "সংরক্ষিত হয়েছে। কাজ করছে কিনা দেখতে “পরীক্ষা” চাপুন।") : (S.lang === "en" ? "Paste your API key first." : "আগে API key পেস্ট করুন।");
+    if (provider) { chat.offline = false; resetChat(); } render();
+  },
+  gemTest: async () => {
+    const m = (document.getElementById("gem-model") || {}).value; if (m) { const g = loadGem(); g.model = m; saveGem(g); }
+    pickProvider(); gemStatus = T("thinking"); render();
+    try { const r = await geminiJSON('Reply with only this JSON: {"ok": true, "reply": "Good morning. Are you ready?"}'); gemStatus = (S.lang === "en" ? "Working. Gemini says: " : "কাজ করছে। Gemini বলছে: ") + (r.reply || "OK"); }
+    catch (e) { gemStatus = aiErrorText(e && e.code) + (e && e.message ? " (" + e.message.slice(0, 120) + ")" : ""); }
+    render();
+  },
+  gemClear: () => { saveGem({ key: "", model: loadGem().model }); pickProvider(); gemStatus = ""; chat.offline = true; resetChat(); render(); },
   aiLevel: (el) => { chat.level = +el.dataset.v; S.ai.level = chat.level; chat.okRun = 0; save(); render(); },
   aiStart: () => { resetChat(); chat.offline = sampleState !== "online"; if (chat.offline) { offlineAsk(); render(); } else aiCall(); },
   aiSend: () => {

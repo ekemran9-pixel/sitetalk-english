@@ -21,8 +21,15 @@ js/app.js             app logic: Data → Store → Voice → Coach → AI → V
 ## How the app works
 
 * **Progress** goes to `localStorage` straight away. When the page runs as a Claude artifact, it is also synced to a private per-user document (`data/users/<id>/progress`), so it follows the signed-in user across devices.
-* **AI Supervisor** uses the artifact `sample` capability (Claude) for role-play and corrections. When that is not available, it falls back to an offline scripted coach. The offline coach uses word matching plus grammar rules with Bangla explanations (`RULES` in app.js).
+* **AI Supervisor** uses one of three providers, in this order:
+  1. **Claude**: used when the page runs as a Claude artifact (`claude.use("sample")`).
+  2. **Gemini (free)**: used anywhere else, e.g. GitHub Pages. Add your own free API key from https://aistudio.google.com/apikey in the app (Home → Settings, or the AI Practice page). The key is stored only in your browser's `localStorage`. It is never committed or synced. The default model is `gemini-flash-lite-latest`, which has the most free requests per day.
+  3. **Offline scripted coach**: used when no AI is available. It checks answers with word matching and grammar rules, with Bangla explanations (`RULES` in app.js).
 * **Voice**: listening uses the browser's speech synthesis. Speaking uses browser speech recognition where it is allowed. Otherwise, use your phone keyboard's dictation key.
+
+## Run on GitHub Pages
+
+In the repo, go to Settings → Pages → Deploy from a branch → `main` / root. The site will be at `https://<user>.github.io/sitetalk-english/`.
 
 ## Planned next steps
 
